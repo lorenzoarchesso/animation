@@ -456,30 +456,35 @@ function drawCharacter(st){
 
 function drawLeg(leg, hi, lo){
   const {hip,knee,ankle,sgn}=leg;
-  // baggy jeans: wider, with a slight flare at the ankle
-  limb(hip,knee,ankle, 15*S,13*S,11*S, gradFor(hip,ankle,hi,lo));
-  // sneaker — drawn flat on the ground, toe pointing forward (-x), mirrored per side
+  // baggy jeans from behind: wide thighs, slight taper at knee
+  limb(hip,knee,ankle, 14*S,12*S,10*S, gradFor(hip,ankle,hi,lo));
+  // back-view sneaker: heel faces the viewer
   ctx.save();
-  ctx.translate(ankle.x, ankle.y+2);
-  ctx.scale(sgn<0?1:-1, 1);          // mirror so both shoes splay outward consistently
-  const g=ctx.createLinearGradient(0,-6,0,8);
+  ctx.translate(ankle.x, ankle.y+1);
+  ctx.scale(sgn<0?1:-1, 1);
+  const g=ctx.createLinearGradient(0,-7,0,9);
   g.addColorStop(0,C.shoe); g.addColorStop(1,C.shoeLo);
   ctx.fillStyle=g;
   ctx.beginPath();
-  ctx.moveTo(7,-6);                   // ankle back
-  ctx.quadraticCurveTo(9,-2, 8,2);
-  ctx.lineTo(-13,5);                  // toe forward
-  ctx.quadraticCurveTo(-18,6, -16,9);
-  ctx.lineTo(6,10);
-  ctx.quadraticCurveTo(9,9, 8,2);
+  ctx.moveTo(10,-7);                        // heel top
+  ctx.quadraticCurveTo(14,-1,12,5);         // rounded heel (prominent from behind)
+  ctx.lineTo(-12,5);                        // toe end
+  ctx.quadraticCurveTo(-16,6,-14,8);
+  ctx.lineTo(9,9);
+  ctx.quadraticCurveTo(13,9,12,5);
   ctx.closePath(); ctx.fill();
-  // sole
-  ctx.fillStyle='rgba(255,255,255,0.9)';
+  // heel counter detail (stiffened back panel of shoe)
+  ctx.fillStyle='rgba(220,210,195,0.52)';
   ctx.beginPath();
-  ctx.moveTo(-16,9); ctx.lineTo(6,10);
-  ctx.quadraticCurveTo(8,13,4,13); ctx.lineTo(-15,12);
-  ctx.quadraticCurveTo(-19,11,-16,9); ctx.closePath(); ctx.fill();
-  // rim
+  ctx.moveTo(10,-5); ctx.quadraticCurveTo(13,0,11,5);
+  ctx.lineTo(7,5); ctx.quadraticCurveTo(10,0,9,-4);
+  ctx.closePath(); ctx.fill();
+  // white sole edge
+  ctx.fillStyle='rgba(255,255,255,0.92)';
+  ctx.beginPath();
+  ctx.moveTo(-14,8); ctx.lineTo(9,9);
+  ctx.quadraticCurveTo(13,10,11,13); ctx.lineTo(-14,12);
+  ctx.quadraticCurveTo(-17,11,-14,8); ctx.closePath(); ctx.fill();
   ctx.strokeStyle=C.rim; ctx.lineWidth=1.2; ctx.shadowColor=C.rimGlow; ctx.shadowBlur=5;
   ctx.stroke();
   ctx.restore();
@@ -498,139 +503,179 @@ function drawArm(arm, sh, hand, front){
 
 function drawHoodie(st){
   const {pelvis,chest,neck,shL,shR,lean}=st;
-  const u  = unit(sub(neck,pelvis));           // body up axis
-  const s  = {x:-u.y, y:u.x};                  // left side axis
+  const u  = unit(sub(neck,pelvis));
+  const s  = {x:-u.y, y:u.x};
   const P=(pt,sx,uy)=>({x:pt.x+s.x*sx+u.x*uy, y:pt.y+s.y*sx+u.y*uy});
 
-  const HHW=L.bodyHipHW, CHW=L.bodyChestHW, OUT=L.shOuter;
-  const hipL=P(pelvis, HHW, 6),  hipR=P(pelvis,-HHW,6);
-  const shLo=P(neck, OUT, 4),    shRo=P(neck,-OUT,4);
-  const hoodL=P(neck, OUT*0.5,-16), hoodR=P(neck,-OUT*0.5,-16);
+  // Back-view hoodie — wider shoulders, no pocket, folded hood on upper back
+  const HHW=L.bodyHipHW+4, CHW=L.bodyChestHW+7;
+  const hipL=P(pelvis, HHW, 6),  hipR=P(pelvis,-HHW, 6);
+  const shlL=P(neck,  CHW, 0),   shlR=P(neck, -CHW,  0);
+  const nkL =P(neck,  9, -3),    nkR =P(neck, -9,   -3);  // back collar edges
 
+  // ── main back silhouette ───────────────────────────────────────────────
   ctx.beginPath();
   ctx.moveTo(hipL.x,hipL.y);
-  ctx.quadraticCurveTo(P(chest,CHW,0).x,P(chest,CHW,0).y, shLo.x,shLo.y);
-  ctx.quadraticCurveTo(hoodL.x,hoodL.y, hoodR.x,hoodR.y);
-  ctx.quadraticCurveTo(P(chest,-CHW,0).x,P(chest,-CHW,0).y, hipR.x,hipR.y);
+  ctx.quadraticCurveTo(P(chest,CHW+3,0).x,P(chest,CHW+3,0).y, shlL.x,shlL.y);
+  ctx.quadraticCurveTo(P(neck,CHW+1,-7).x,P(neck,CHW+1,-7).y, nkL.x,nkL.y);
+  ctx.quadraticCurveTo(P(neck,0,-1).x,P(neck,0,-1).y, nkR.x,nkR.y);
+  ctx.quadraticCurveTo(P(neck,-CHW-1,-7).x,P(neck,-CHW-1,-7).y, shlR.x,shlR.y);
+  ctx.quadraticCurveTo(P(chest,-CHW-3,0).x,P(chest,-CHW-3,0).y, hipR.x,hipR.y);
   ctx.quadraticCurveTo(P(pelvis,0,12).x,P(pelvis,0,12).y, hipL.x,hipL.y);
   ctx.closePath();
-  const g=ctx.createLinearGradient(neck.x,neck.y,pelvis.x,pelvis.y);
-  g.addColorStop(0,C.hoodieHi); g.addColorStop(1,C.hoodieLo);
+
+  const g=ctx.createLinearGradient(shlL.x,shlL.y,hipL.x,hipL.y);
+  g.addColorStop(0,C.hoodieHi); g.addColorStop(0.65,C.hoodieLo); g.addColorStop(1,'#18181f');
   ctx.fillStyle=g; ctx.fill();
 
-  // centre seam + hem detail
-  ctx.strokeStyle='rgba(0,0,0,0.18)'; ctx.lineWidth=1.4;
-  ctx.beginPath(); ctx.moveTo(neck.x,neck.y); ctx.lineTo(P(pelvis,0,8).x,P(pelvis,0,8).y); ctx.stroke();
-  // kangaroo pocket
-  const pk=P(pelvis,0,-10);
-  ctx.strokeStyle='rgba(0,0,0,0.16)';
+  // ── folded hood hanging between shoulder blades ────────────────────────
+  const hoodCtr=P(neck,0,14*S);
+  ctx.fillStyle='#2e2e3b';
   ctx.beginPath();
-  ctx.moveTo(P(pk,14,0).x,P(pk,14,0).y);
-  ctx.lineTo(P(pk,10,14).x,P(pk,10,14).y);
-  ctx.lineTo(P(pk,-10,14).x,P(pk,-10,14).y);
-  ctx.lineTo(P(pk,-14,0).x,P(pk,-14,0).y);
+  ctx.ellipse(hoodCtr.x,hoodCtr.y, 13*S,9*S, lean, 0, Math.PI*2);
+  ctx.fill();
+  ctx.strokeStyle='rgba(0,0,0,0.28)'; ctx.lineWidth=1.3;
+  [-1,1].forEach(side=>{
+    ctx.beginPath();
+    ctx.moveTo(P(neck,side*3,1).x,P(neck,side*3,1).y);
+    ctx.quadraticCurveTo(hoodCtr.x+side*3,hoodCtr.y-3, hoodCtr.x+side*2,hoodCtr.y+5);
+    ctx.stroke();
+  });
+
+  // ── center back seam ──────────────────────────────────────────────────
+  ctx.strokeStyle='rgba(0,0,0,0.20)'; ctx.lineWidth=1.4;
+  ctx.beginPath();
+  ctx.moveTo(P(neck,0,-1).x,P(neck,0,-1).y);
+  ctx.lineTo(P(pelvis,0,8).x,P(pelvis,0,8).y);
   ctx.stroke();
 
-  // back-light rim along the silhouette
+  // ── shoulder blade creases ────────────────────────────────────────────
+  ctx.strokeStyle='rgba(0,0,0,0.10)'; ctx.lineWidth=1.2;
+  [1,-1].forEach(side=>{
+    ctx.beginPath();
+    ctx.moveTo(P(neck,side*12,-1).x,P(neck,side*12,-1).y);
+    ctx.quadraticCurveTo(P(chest,side*16,-6).x,P(chest,side*16,-6).y,
+                         P(chest,side*21,6).x,P(chest,side*21,6).y);
+    ctx.stroke();
+  });
+
+  // ── rim light on back silhouette ──────────────────────────────────────
   ctx.save();
   ctx.beginPath();
   ctx.moveTo(hipL.x,hipL.y);
-  ctx.quadraticCurveTo(P(chest,CHW,0).x,P(chest,CHW,0).y, shLo.x,shLo.y);
-  ctx.quadraticCurveTo(hoodL.x,hoodL.y, hoodR.x,hoodR.y);
-  ctx.quadraticCurveTo(P(chest,-CHW,0).x,P(chest,-CHW,0).y, hipR.x,hipR.y);
-  ctx.strokeStyle=C.rim; ctx.lineWidth=2; ctx.shadowColor=C.rimGlow; ctx.shadowBlur=10;
+  ctx.quadraticCurveTo(P(chest,CHW+3,0).x,P(chest,CHW+3,0).y, shlL.x,shlL.y);
+  ctx.quadraticCurveTo(P(neck,CHW+1,-7).x,P(neck,CHW+1,-7).y, nkL.x,nkL.y);
+  ctx.quadraticCurveTo(P(neck,0,-1).x,P(neck,0,-1).y, nkR.x,nkR.y);
+  ctx.quadraticCurveTo(P(neck,-CHW-1,-7).x,P(neck,-CHW-1,-7).y, shlR.x,shlR.y);
+  ctx.quadraticCurveTo(P(chest,-CHW-3,0).x,P(chest,-CHW-3,0).y, hipR.x,hipR.y);
+  ctx.strokeStyle=C.rim; ctx.lineWidth=2.2;
+  ctx.shadowColor=C.rimGlow; ctx.shadowBlur=12;
   ctx.stroke();
   ctx.restore();
-
-  // soft hood collar (subtle, mostly hidden by hair)
-  ctx.fillStyle='rgba(30,20,26,0.35)';
-  ctx.beginPath();
-  ctx.ellipse(neck.x, neck.y+2, OUT*0.36, 6, lean, 0, 7);
-  ctx.fill();
 }
 
 function drawHair(st){
-  const {neck,headC,chest,lean,hairSway}=st;
-  const u  = unit(sub(headC,neck));         // up axis (toward crown)
-  const s  = {x:-u.y, y:u.x};               // left axis
+  const {neck,headC,chest,pelvis,lean,hairSway}=st;
+  const u  = unit(sub(headC,neck));
+  const s  = {x:-u.y, y:u.x};
   const P=(pt,sx,uy)=>({x:pt.x+s.x*sx+u.x*uy, y:pt.y+s.y*sx+u.y*uy});
   const R=L.headR;
 
-  // neck skin patch (mostly covered by hair)
-  ctx.fillStyle=C.skin;
-  ctx.beginPath(); ctx.ellipse(neck.x,neck.y-2,7*S,9*S,lean,0,7); ctx.fill();
+  // Hair flows from crown down to upper-back (the star feature from behind)
+  const flowEnd = lerpP(neck, pelvis, 0.36 + st.sit*0.10);
+  const sway = Math.sin(hairSway)*R*0.9;
 
-  // hair flows from the crown down onto the upper back (between neck and chest)
-  const flow = lerpP(neck, chest, 0.55);
-  const sway = Math.sin(hairSway)*R*0.5;
+  // Key silhouette points
+  const crown = P(headC, 0, R*1.08);
+  const sideL = P(headC,  R*2.1, R*0.25);
+  const sideR = P(headC, -R*2.1, R*0.25);
+  const midL  = P(headC,  R*2.35, -R*0.55);
+  const midR  = P(headC, -R*2.35, -R*0.55);
+  const lowL  = {x:P(flowEnd, R*1.65,0).x+sway*0.55, y:P(flowEnd, R*1.65,0).y};
+  const lowR  = {x:P(flowEnd,-R*1.65,0).x+sway*0.55, y:P(flowEnd,-R*1.65,0).y};
+  const tipPt = {x:P(flowEnd,0,R*0.55).x+sway,        y:P(flowEnd,0,R*0.55).y};
 
-  // ── main curly silhouette ──────────────────────────────────────────────
-  const crown = P(headC, 0, R*1.1);
-  const tL = P(headC,  R*1.42, R*0.15),  tR = P(headC, -R*1.42, R*0.15);
-  const mL = P(headC,  R*1.38, -R*0.9),  mR = P(headC, -R*1.38, -R*0.9);
-  const bL = { x:P(flow, R*1.15,0).x+sway,  y:P(flow, R*1.15,0).y };
-  const bR = { x:P(flow,-R*1.15,0).x+sway,  y:P(flow,-R*1.15,0).y };
-  const tip= { x:P(flow, 0,-R*0.5).x+sway*1.4, y:P(flow,0,-R*0.5).y };
-
+  // ── shadow layer (depth illusion) ─────────────────────────────────────
   ctx.beginPath();
   ctx.moveTo(crown.x,crown.y);
-  ctx.quadraticCurveTo(P(headC,R*1.7,R).x,P(headC,R*1.7,R).y, tL.x,tL.y);
-  ctx.quadraticCurveTo(mL.x,mL.y, bL.x,bL.y);
-  ctx.quadraticCurveTo(tip.x,tip.y, bR.x,bR.y);
-  ctx.quadraticCurveTo(mR.x,mR.y, tR.x,tR.y);
-  ctx.quadraticCurveTo(P(headC,-R*1.7,R).x,P(headC,-R*1.7,R).y, crown.x,crown.y);
+  ctx.quadraticCurveTo(P(headC,R*2.55,R*0.9).x,P(headC,R*2.55,R*0.9).y, sideL.x,sideL.y);
+  ctx.quadraticCurveTo(midL.x+4,midL.y+4, lowL.x+3,lowL.y+5);
+  ctx.quadraticCurveTo(tipPt.x,tipPt.y+7, lowR.x-3,lowR.y+5);
+  ctx.quadraticCurveTo(midR.x-4,midR.y+4, sideR.x,sideR.y);
+  ctx.quadraticCurveTo(P(headC,-R*2.55,R*0.9).x,P(headC,-R*2.55,R*0.9).y, crown.x,crown.y);
   ctx.closePath();
-  const hg=ctx.createLinearGradient(crown.x,crown.y,tip.x,tip.y);
-  hg.addColorStop(0,C.hairHi); hg.addColorStop(0.5,C.hairMid); hg.addColorStop(1,C.hairLo);
+  ctx.fillStyle=C.hairLo; ctx.fill();
+
+  // ── main hair mass ────────────────────────────────────────────────────
+  ctx.beginPath();
+  ctx.moveTo(crown.x,crown.y);
+  ctx.quadraticCurveTo(P(headC,R*2.55,R*0.9).x,P(headC,R*2.55,R*0.9).y, sideL.x,sideL.y);
+  ctx.quadraticCurveTo(midL.x,midL.y, lowL.x,lowL.y);
+  ctx.quadraticCurveTo(tipPt.x+5,tipPt.y-3, tipPt.x,tipPt.y);
+  ctx.quadraticCurveTo(tipPt.x-5,tipPt.y-3, lowR.x,lowR.y);
+  ctx.quadraticCurveTo(midR.x,midR.y, sideR.x,sideR.y);
+  ctx.quadraticCurveTo(P(headC,-R*2.55,R*0.9).x,P(headC,-R*2.55,R*0.9).y, crown.x,crown.y);
+  ctx.closePath();
+
+  const hg=ctx.createLinearGradient(crown.x,crown.y,tipPt.x,tipPt.y);
+  hg.addColorStop(0,C.hairHi); hg.addColorStop(0.42,C.hairMid); hg.addColorStop(1,C.hairLo);
   ctx.fillStyle=hg; ctx.fill();
 
-  // back-light rim around the hair silhouette
+  // ── golden rim glow (back-light key feature) ──────────────────────────
   ctx.save();
-  ctx.strokeStyle='rgba(255,228,170,0.7)'; ctx.lineWidth=2;
-  ctx.shadowColor='rgba(255,225,150,0.8)'; ctx.shadowBlur=12;
+  ctx.strokeStyle='rgba(255,228,148,0.78)'; ctx.lineWidth=2.8;
+  ctx.shadowColor='rgba(255,218,120,0.95)'; ctx.shadowBlur=20;
   ctx.stroke();
   ctx.restore();
 
-  // ── curl texture: scalloped lobes over the whole mass ──────────────────
-  const lobes=[
-    [0,R*1.05,7],[ R*0.7,R*0.8,8],[-R*0.7,R*0.8,8],
-    [ R*1.15,R*0.1,7],[-R*1.15,R*0.1,7],
-    [ R*0.55,-R*0.45,8],[-R*0.55,-R*0.45,8],[0,-R*0.3,8],
+  // ── curl lobes on the head mass ───────────────────────────────────────
+  const headLobes=[
+    [0,      R*0.98, 10  ],
+    [ R*0.88, R*0.70, 11 ], [-R*0.88, R*0.70, 11],
+    [ R*1.58, R*0.08,  9 ], [-R*1.58, R*0.08,  9],
+    [ R*1.72,-R*0.52,  8.5],[-R*1.72,-R*0.52,  8.5],
+    [ R*0.72,-R*0.38, 10 ], [-R*0.72,-R*0.38, 10],
+    [0,      -R*0.22, 10.5],
   ];
-  lobes.forEach(([sx,uy,r],i)=>{
+  headLobes.forEach(([sx,uy,r])=>{
     const c=P(headC,sx,uy);
-    const grd=ctx.createRadialGradient(c.x-r*0.3,c.y-r*0.3,1,c.x,c.y,r);
-    grd.addColorStop(0,C.hairHi); grd.addColorStop(1,C.hairMid);
+    const grd=ctx.createRadialGradient(c.x-r*0.35,c.y-r*0.35,1,c.x,c.y,r);
+    grd.addColorStop(0,C.hairHi); grd.addColorStop(0.55,C.hairMid); grd.addColorStop(1,C.hairLo);
     ctx.fillStyle=grd;
-    ctx.beginPath(); ctx.arc(c.x,c.y,r,0,7); ctx.fill();
+    ctx.beginPath(); ctx.arc(c.x,c.y,r,0,Math.PI*2); ctx.fill();
   });
-  // curls cascading down the back
-  for(let i=0;i<6;i++){
-    const f=i/5;
-    const cc=lerpP(P(headC,0,-R*0.2), tip, f);
-    cc.x += Math.sin(hairSway+f*2)*sway*0.6 + (i%2?6:-6);
-    const r=(7-f*3)*S;
+
+  // ── cascading ringlets down the back ──────────────────────────────────
+  const cascStart=P(headC,0,-R*0.22);
+  for(let i=0;i<11;i++){
+    const f=i/10;
+    const cc=lerpP(cascStart,tipPt,f);
+    cc.x += Math.sin(hairSway+f*2.8+i*0.85)*sway*0.85 + (i%2===0?12:-12);
+    const r=(10.5-f*5)*S;
     const grd=ctx.createRadialGradient(cc.x-r*0.3,cc.y-r*0.3,1,cc.x,cc.y,r);
-    grd.addColorStop(0,C.hairMid); grd.addColorStop(1,C.hairLo);
+    grd.addColorStop(0,f<0.45?C.hairHi:C.hairMid); grd.addColorStop(1,C.hairLo);
     ctx.fillStyle=grd;
-    ctx.beginPath(); ctx.arc(cc.x,cc.y,r,0,7); ctx.fill();
+    ctx.beginPath(); ctx.arc(cc.x,cc.y,r,0,Math.PI*2); ctx.fill();
   }
 
-  // crown back-light bloom
+  // ── crown back-light bloom ────────────────────────────────────────────
   ctx.save(); ctx.globalCompositeOperation='screen';
-  const top=P(headC,0,R*0.9);
-  const g=ctx.createRadialGradient(top.x,top.y,2,top.x,top.y,R*2);
-  g.addColorStop(0,'rgba(255,238,184,0.7)'); g.addColorStop(1,'rgba(255,238,184,0)');
-  ctx.fillStyle=g; ctx.beginPath(); ctx.arc(top.x,top.y,R*2,0,7); ctx.fill();
+  const top=P(headC,0,R*0.92);
+  const g=ctx.createRadialGradient(top.x,top.y,2,top.x,top.y,R*2.7);
+  g.addColorStop(0,'rgba(255,242,190,0.82)'); g.addColorStop(1,'rgba(255,238,180,0)');
+  ctx.fillStyle=g; ctx.beginPath(); ctx.arc(top.x,top.y,R*2.7,0,Math.PI*2); ctx.fill();
   ctx.restore();
 
-  // bright highlight strands catching the back-light
-  ctx.strokeStyle='rgba(255,234,168,0.6)'; ctx.lineWidth=1.4; ctx.lineCap='round';
-  for(let i=-1;i<=1;i++){
-    const a=P(headC,i*9,R*0.5), b={x:tip.x+i*8, y:tip.y-4};
+  // ── highlight strands catching the back-light ─────────────────────────
+  ctx.strokeStyle='rgba(255,238,178,0.68)'; ctx.lineWidth=1.7; ctx.lineCap='round';
+  [[-14,R*0.55,lowL.x-4,lowL.y+2],
+   [  0,R*0.78,tipPt.x, tipPt.y+1],
+   [ 14,R*0.55,lowR.x+4,lowR.y+2]].forEach(([ax,ay,bx,by])=>{
+    const a=P(headC,ax,ay);
     ctx.beginPath(); ctx.moveTo(a.x,a.y);
-    ctx.quadraticCurveTo((a.x+b.x)/2+i*5,(a.y+b.y)/2,b.x,b.y); ctx.stroke();
-  }
+    ctx.quadraticCurveTo((a.x+bx)/2+Math.sin(hairSway)*5,(a.y+by)/2,bx,by);
+    ctx.stroke();
+  });
 }
 
 /* ─── soft contact shadow under the figure ─────────────────────────────── */
