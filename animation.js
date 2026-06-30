@@ -1,574 +1,730 @@
-/**
- * Girl on a Bench — Canvas 2D Animation
- * Duration: ~6 seconds  |  60 fps
+/* =============================================================================
+ *  THE ROSE ON THE BENCH  —  cinematic 2D canvas animation
+ *  A girl walks in, sits on a park bench and lays a rose beside her.
+ *  Inspired by the reference frames: backlit pink mist, curly blonde hair,
+ *  charcoal hoodie, baggy light jeans, white sneakers, a single pink rose.
  *
- * Scene (inspired by the reference images):
- *   0.0 – 2.5 s  →  girl walks from right edge toward the bench
- *   2.5 – 4.0 s  →  girl slows, leans on bench, sits down
- *   4.0 – 5.5 s  →  girl gently places the rose beside her on the bench
- *   5.5 – 6.0 s  →  hold / fade-out
- */
+ *  Techniques used (the "professional" part):
+ *   · skeletal rig + 2-bone inverse kinematics for limbs
+ *   · tapered vector ribbons (smooth silhouettes, not stacked ellipses)
+ *   · back-light rim glow on every body part
+ *   · curly hair with delayed secondary motion
+ *   · choreography driven by eased keyframes (anticipation / settle / breathe)
+ *   · layered atmosphere: volumetric god-rays, drifting fog, depth-blurred trees
+ *   · wet-ground mirror reflection of the whole character + bench
+ *   · floating + grounded petals, soft contact shadows
+ *   · slow cinematic camera push-in
+ * ========================================================================== */
 
 const canvas = document.getElementById('c');
 const ctx    = canvas.getContext('2d');
-const W = canvas.width;   // 1280
-const H = canvas.height;  // 720
+const W = canvas.width;    // 1280
+const H = canvas.height;   // 720
 
-// ─── Timing ─────────────────────────────────────────────────────────────────
-const FPS      = 60;
-const DURATION = 6.0;          // seconds
-let   t        = 0;            // current time (seconds)
-let   rafId    = null;
-let   playing  = false;
-let   lastTS   = null;
+/* ─── Timeline ─────────────────────────────────────────────────────────── */
+const T = {
+  walkEnd:  2.6,   // arrives at the bench
+  sitStart: 3.15,
+  sitEnd:   4.35,  // fully seated
+  reachA:   4.30,  // start lowering the rose
+  reachB:   5.15,  // rose touches the seat
+  retreatA: 5.20,  // hand comes back
+  retreatB: 5.85,
+  end:      6.2,
+};
+const HOLD = 0.9;                       // freeze before the loop restarts
+const CYCLE = T.end + HOLD;
 
-// ─── Colours (from the reference palette) ───────────────────────────────────
-const CLR = {
-  bg1:       '#f7c5cc',   // light pink fog top
-  bg2:       '#c0556a',   // deeper rose bottom
-  fog:       'rgba(255,200,210,0.45)',
-  bench:     '#6b3a2a',
-  benchDark: '#3d1f14',
-  ground:    '#b8495e',
-  groundRef: 'rgba(180,70,90,0.3)',
-  petal:     '#f07090',
-  petalDark: '#c0405a',
-  skin:      '#f5dcc8',
-  hair:      '#d4a050',
-  hoodie:    '#5a5870',
-  jeans:     '#8aaccc',
-  shoe:      '#e8ddd0',
-  rosePink:  '#f06080',
-  roseGreen: '#4a8040',
+/* ─── Scene geometry ───────────────────────────────────────────────────── */
+const GROUND   = H * 0.85;              // standing foot line
+const BX       = W * 0.50;             // bench centre x
+const SEAT_Y   = H * 0.74;             // bench seat top
+const BENCH_HW = 158;                  // bench half width
+const STAND_PY = GROUND - 132;         // standing pelvis y
+const SEAT_PY  = SEAT_Y + 10;          // seated pelvis y
+
+/* ─── Character scale + bone lengths (already scaled) ──────────────────── */
+const S = 1.30;
+const L = {
+  thigh: 58*S, shin: 56*S,
+  uArm: 40*S,  fArm: 38*S,
+  hipHW: 12*S, shHW: 18*S,
+  torso: 74*S, neckHead: 18*S, headR: 20*S,
+  bodyHipHW: 23*S, bodyChestHW: 25*S, shOuter: 25*S,
+};
+const STRIDE = 44, LIFT = 14, BOB = 7, STEP_F = 1.9;
+
+/* ─── Palette ──────────────────────────────────────────────────────────── */
+const C = {
+  hoodieHi: '#4a4a57', hoodieLo: '#2a2a33',
+  jeansHi:  '#9fb6d2', jeansLo:  '#6f8aac',
+  shoe:     '#ece4d7', shoeLo: '#cdbfa8',
+  skin:     '#e7bd9f',
+  hairHi:   '#e7c074', hairMid: '#c79a4f', hairLo: '#8f6630',
+  hairGlow: '#ffe6a0',
+  rose:     '#e9637f', roseHi: '#f4a0b0', roseCore: '#b23a57',
+  stem:     '#4f7f3f', stemHi: '#6fa45a',
+  rim:      'rgba(255,206,220,0.55)',
+  rimGlow:  'rgba(255,190,210,0.85)',
 };
 
-// ─── Petals (static scatter on ground) ──────────────────────────────────────
-const PETALS = Array.from({ length: 60 }, () => ({
-  x: Math.random() * W,
-  y: H * 0.72 + Math.random() * H * 0.28,
-  r: 4 + Math.random() * 8,
-  angle: Math.random() * Math.PI * 2,
-}));
+/* ─── Math helpers ─────────────────────────────────────────────────────── */
+const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+const lerp  = (a,b,t)=>a+(b-a)*t;
+const lerpP = (a,b,t)=>({x:lerp(a.x,b.x,t), y:lerp(a.y,b.y,t)});
+const easeInOutCubic = x => x<0.5 ? 4*x*x*x : 1-Math.pow(-2*x+2,3)/2;
+const easeOutCubic   = x => 1-Math.pow(1-x,3);
+const easeInOutSine  = x => -(Math.cos(Math.PI*x)-1)/2;
+function smooth(a,b,x){ const t=clamp((x-a)/(b-a),0,1); return t*t*(3-2*t); }
+const add=(a,b)=>({x:a.x+b.x,y:a.y+b.y});
+const sub=(a,b)=>({x:a.x-b.x,y:a.y-b.y});
+function unit(v){ const m=Math.hypot(v.x,v.y)||1; return {x:v.x/m,y:v.y/m}; }
+function perp(a,b){ const d=unit(sub(b,a)); return {x:-d.y,y:d.x}; }
 
-// ─── Bench geometry (centre-ish of canvas) ──────────────────────────────────
-const BX = W * 0.5;   // bench centre x
-const BY = H * 0.62;  // bench seat top y
-
-// ─── Easing helpers ─────────────────────────────────────────────────────────
-function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
-function smoothstep(edge0, edge1, x) {
-  const t = clamp((x - edge0) / (edge1 - edge0), 0, 1);
-  return t * t * (3 - 2 * t);
+/* 2-bone inverse kinematics: root → joint → end, bendSign picks the elbow */
+function ik(root, target, l1, l2, bendSign){
+  let d = Math.hypot(target.x-root.x, target.y-root.y);
+  d = clamp(d, Math.abs(l1-l2)+0.001, (l1+l2)*0.999);
+  const a = Math.atan2(target.y-root.y, target.x-root.x);
+  const ca = clamp((l1*l1 + d*d - l2*l2)/(2*l1*d), -1, 1);
+  const ang = a + bendSign*Math.acos(ca);
+  const joint = { x: root.x+Math.cos(ang)*l1, y: root.y+Math.sin(ang)*l1 };
+  const end   = { x: root.x+Math.cos(a)*d,    y: root.y+Math.sin(a)*d };
+  return { joint, end };
 }
 
-// ─── Draw helpers ───────────────────────────────────────────────────────────
+/* ─── Petals (depth-sorted; some grounded, some drifting) ──────────────── */
+const PETALS = Array.from({length: 46}, () => {
+  const ground = Math.random() < 0.6;
+  return {
+    ground,
+    x: Math.random()*W,
+    y: ground ? GROUND + Math.random()*(H-GROUND)*0.9 : Math.random()*H*0.7,
+    z: 0.4 + Math.random()*0.9,                 // depth → size & speed
+    rot: Math.random()*Math.PI*2,
+    spin: (Math.random()-0.5)*0.6,
+    sway: Math.random()*Math.PI*2,
+    fall: 14 + Math.random()*22,
+  };
+});
 
-function drawBackground() {
-  // Gradient sky / fog
-  const gr = ctx.createLinearGradient(0, 0, 0, H);
-  gr.addColorStop(0,   '#f9d0d8');
-  gr.addColorStop(0.5, '#f0b0be');
-  gr.addColorStop(1,   '#c06070');
-  ctx.fillStyle = gr;
-  ctx.fillRect(0, 0, W, H);
+/* =============================================================================
+ *  ENVIRONMENT
+ * ========================================================================== */
+function drawSky(){
+  const g = ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#f8d3da'); g.addColorStop(0.42,'#f0aebb');
+  g.addColorStop(0.72,'#dd8a9c'); g.addColorStop(1,'#b86577');
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
 
-  // Soft radial glow in the centre (like the backlight in the references)
-  const glow = ctx.createRadialGradient(W / 2, H * 0.35, 40, W / 2, H * 0.35, W * 0.55);
-  glow.addColorStop(0,   'rgba(255,240,230,0.8)');
-  glow.addColorStop(0.5, 'rgba(255,200,210,0.3)');
-  glow.addColorStop(1,   'rgba(255,200,210,0)');
-  ctx.fillStyle = glow;
-  ctx.fillRect(0, 0, W, H);
+  // warm back-light bloom (the sun behind the mist)
+  const glow = ctx.createRadialGradient(W*0.5,H*0.34,20, W*0.5,H*0.34,W*0.62);
+  glow.addColorStop(0,'rgba(255,247,236,0.95)');
+  glow.addColorStop(0.35,'rgba(255,214,221,0.45)');
+  glow.addColorStop(1,'rgba(255,214,221,0)');
+  ctx.fillStyle=glow; ctx.fillRect(0,0,W,H);
+}
 
-  // Misty ground plane
-  const gnd = ctx.createLinearGradient(0, H * 0.68, 0, H);
-  gnd.addColorStop(0, 'rgba(160,60,75,0.0)');
-  gnd.addColorStop(1, 'rgba(120,40,55,0.7)');
-  ctx.fillStyle = gnd;
-  ctx.fillRect(0, H * 0.68, W, H * 0.32);
-
-  // Wet-ground reflection strip
+function drawGodRays(now){
   ctx.save();
-  ctx.globalAlpha = 0.25;
-  const ref = ctx.createLinearGradient(0, H * 0.70, 0, H);
-  ref.addColorStop(0, '#f0a0b0');
-  ref.addColorStop(1, '#803040');
-  ctx.fillStyle = ref;
-  ctx.fillRect(0, H * 0.72, W, H * 0.08);
-  ctx.restore();
-}
-
-function drawTreeFog() {
-  // Left tree mass
-  ctx.save();
-  ctx.globalAlpha = 0.5;
-  const lt = ctx.createRadialGradient(W * 0.05, H * 0.3, 10, W * 0.05, H * 0.3, W * 0.3);
-  lt.addColorStop(0, 'rgba(140,40,55,0.6)');
-  lt.addColorStop(1, 'rgba(140,40,55,0)');
-  ctx.fillStyle = lt;
-  ctx.fillRect(0, 0, W * 0.4, H);
-
-  // Right tree mass
-  const rt = ctx.createRadialGradient(W * 0.95, H * 0.3, 10, W * 0.95, H * 0.3, W * 0.3);
-  rt.addColorStop(0, 'rgba(140,40,55,0.6)');
-  rt.addColorStop(1, 'rgba(140,40,55,0)');
-  ctx.fillStyle = rt;
-  ctx.fillRect(W * 0.6, 0, W * 0.4, H);
-  ctx.restore();
-}
-
-function drawPetals() {
-  PETALS.forEach(p => {
+  ctx.globalCompositeOperation='lighter';
+  const cx=W*0.5, cy=H*0.30;
+  for(let i=0;i<9;i++){
+    const a = -Math.PI/2 + (i-4)*0.12 + Math.sin(now*0.0003+i)*0.015;
+    const len = H*1.25, spread = 0.045 + (i%2)*0.02;
+    const flick = 0.05 + 0.035*Math.sin(now*0.0011 + i*1.7);
     ctx.save();
-    ctx.translate(p.x, p.y);
-    ctx.rotate(p.angle);
-    ctx.fillStyle = CLR.petal;
+    ctx.translate(cx,cy); ctx.rotate(a);
+    const grd=ctx.createLinearGradient(0,0,0,len);
+    grd.addColorStop(0,`rgba(255,246,232,${flick})`);
+    grd.addColorStop(1,'rgba(255,246,232,0)');
+    ctx.fillStyle=grd;
     ctx.beginPath();
-    ctx.ellipse(0, 0, p.r, p.r * 0.55, 0, 0, Math.PI * 2);
+    ctx.moveTo(0,0);
+    ctx.lineTo(-len*spread,len);
+    ctx.lineTo( len*spread,len);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+function drawTrees(){
+  ctx.save();
+  ctx.filter='blur(18px)';
+  // left + right blurred foliage masses for depth
+  [[W*0.04,'rgba(150,62,80,0.55)'],[W*0.97,'rgba(150,62,80,0.55)']].forEach(([x,col])=>{
+    const g=ctx.createRadialGradient(x,H*0.32,10,x,H*0.32,W*0.34);
+    g.addColorStop(0,col); g.addColorStop(1,'rgba(150,62,80,0)');
+    ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+  });
+  // a few soft canopy blobs
+  ctx.fillStyle='rgba(168,70,90,0.35)';
+  const blobs=[[60,120,90],[150,90,70],[1180,130,95],[1110,80,60],[40,260,80]];
+  blobs.forEach(([x,y,r])=>{ ctx.beginPath(); ctx.arc(x,y,r,0,7); ctx.fill(); });
+  ctx.filter='none';
+  ctx.restore();
+}
+
+function drawFog(now){
+  ctx.save();
+  ctx.globalCompositeOperation='screen';
+  for(let i=0;i<3;i++){
+    const y = H*(0.5+i*0.14);
+    const off = (now*0.012*(i+1)) % (W+400) - 200;
+    const g=ctx.createRadialGradient(off,y,10,off,y,420);
+    g.addColorStop(0,`rgba(255,225,232,${0.18-i*0.03})`);
+    g.addColorStop(1,'rgba(255,225,232,0)');
+    ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+    const g2=ctx.createRadialGradient(W-off,y+30,10,W-off,y+30,460);
+    g2.addColorStop(0,`rgba(255,220,228,${0.14-i*0.02})`);
+    g2.addColorStop(1,'rgba(255,220,228,0)');
+    ctx.fillStyle=g2; ctx.fillRect(0,0,W,H);
+  }
+  ctx.restore();
+}
+
+function drawGround(){
+  const g=ctx.createLinearGradient(0,GROUND-40,0,H);
+  g.addColorStop(0,'rgba(150,60,78,0)');
+  g.addColorStop(0.25,'rgba(150,62,80,0.55)');
+  g.addColorStop(1,'rgba(96,40,54,0.92)');
+  ctx.fillStyle=g; ctx.fillRect(0,GROUND-40,W,H-GROUND+40);
+
+  // wet sheen highlight near the horizon line
+  ctx.save(); ctx.globalCompositeOperation='screen';
+  const s=ctx.createLinearGradient(0,GROUND-10,0,GROUND+70);
+  s.addColorStop(0,'rgba(255,225,232,0.30)');
+  s.addColorStop(1,'rgba(255,225,232,0)');
+  ctx.fillStyle=s; ctx.fillRect(0,GROUND-10,W,80);
+  ctx.restore();
+}
+
+function drawPetals(now){
+  PETALS.forEach(p=>{
+    if(!p.ground){
+      p.y += p.fall*0.016*p.z;
+      p.x += Math.sin(now*0.001 + p.sway)*0.5;
+      p.rot += p.spin*0.02;
+      if(p.y>H+10){ p.y=-10; p.x=Math.random()*W; }
+    }
+    const sz=4*p.z + (p.ground?2:0);
+    ctx.save();
+    ctx.translate(p.x,p.y); ctx.rotate(p.rot);
+    ctx.globalAlpha = p.ground?0.85:0.7;
+    const g=ctx.createLinearGradient(-sz,0,sz,0);
+    g.addColorStop(0,'#d85f7c'); g.addColorStop(1,'#f29ab0');
+    ctx.fillStyle=g;
+    ctx.beginPath();
+    ctx.moveTo(0,-sz);
+    ctx.bezierCurveTo(sz,-sz, sz, sz*0.6, 0, sz);
+    ctx.bezierCurveTo(-sz, sz*0.6, -sz,-sz, 0,-sz);
     ctx.fill();
     ctx.restore();
   });
 }
 
-// ─── Bench ──────────────────────────────────────────────────────────────────
-function drawBench() {
-  const sw = 260;   // seat width
-  const sh = 18;    // seat plank height
-  const sx = BX - sw / 2;
-  const sy = BY;
+/* ─── Bench ────────────────────────────────────────────────────────────── */
+function drawBench(){
+  const x0=BX-BENCH_HW, x1=BX+BENCH_HW;
+  const wood=(y,h,light)=>{
+    const g=ctx.createLinearGradient(0,y,0,y+h);
+    g.addColorStop(0, light?'#7a4632':'#5e3625');
+    g.addColorStop(0.5,'#4a2a1c');
+    g.addColorStop(1,'#341d13');
+    ctx.fillStyle=g;
+  };
+  const plank=(x,y,w,h,light)=>{ wood(y,h,light); roundRect(x,y,w,h,5); ctx.fill();
+    // top rim light
+    ctx.save(); ctx.globalCompositeOperation='screen';
+    ctx.fillStyle='rgba(255,210,200,0.18)'; roundRect(x,y,w,Math.max(2,h*0.28),5); ctx.fill();
+    ctx.restore();
+  };
 
-  // Legs
-  ctx.fillStyle = CLR.benchDark;
-  [sx + 20, sx + sw - 20].forEach(lx => {
-    ctx.fillRect(lx - 6, sy + sh, 12, 80);
-    // cross-brace
-    ctx.fillRect(lx - 6, sy + sh + 50, 12, 8);
-  });
+  // back legs / posts
+  ctx.fillStyle='#311a11';
+  [x0+26,x1-26].forEach(lx=>{ roundRect(lx-6,SEAT_Y-86,12,88,3); ctx.fill(); });
+  // backrest planks
+  plank(x0, SEAT_Y-86, BENCH_HW*2, 16, true);
+  plank(x0, SEAT_Y-60, BENCH_HW*2, 16, false);
+  // post caps
+  ctx.fillStyle='#241008';
+  [x0+26,x1-26].forEach(lx=>{ roundRect(lx-9,SEAT_Y-92,18,12,3); ctx.fill(); });
 
-  // Back legs extension to top
-  [sx + 20, sx + sw - 20].forEach(lx => {
-    ctx.fillRect(lx - 6, sy - 70, 10, 72);
-  });
+  // front legs
+  ctx.fillStyle='#2a1610';
+  [x0+30,x1-30].forEach(lx=>{ roundRect(lx-6,SEAT_Y+14,12,70,3); ctx.fill();
+    roundRect(lx-6,SEAT_Y+54,12,7,2); ctx.fill(); });
 
-  // Seat planks (3)
-  ctx.fillStyle = CLR.bench;
-  for (let i = 0; i < 3; i++) {
-    roundRect(sx, sy + i * (sh + 4), sw, sh, 4, CLR.bench);
-  }
-
-  // Back planks (2)
-  for (let i = 0; i < 2; i++) {
-    roundRect(sx, sy - 65 + i * (sh + 4), sw, sh, 4, CLR.bench);
-  }
-
-  // Post tops (cap)
-  ctx.fillStyle = CLR.benchDark;
-  [sx + 20, sx + sw - 20].forEach(lx => {
-    roundRect(lx - 8, sy - 70, 14, 14, 3, CLR.benchDark);
-  });
+  // seat planks (front-most last)
+  plank(x0, SEAT_Y,    BENCH_HW*2, 15, true);
+  plank(x0, SEAT_Y+15, BENCH_HW*2, 15, false);
 }
 
-function roundRect(x, y, w, h, r, color) {
+function roundRect(x,y,w,h,r){
   ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.lineTo(x + w - r, y);
-  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-  ctx.lineTo(x + w, y + h - r);
-  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-  ctx.lineTo(x + r, y + h);
-  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-  ctx.lineTo(x, y + r);
-  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);
+  ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);
+  ctx.arcTo(x,y,x+w,y,r);
   ctx.closePath();
-  ctx.fillStyle = color;
-  ctx.fill();
 }
 
-// ─── Rose ───────────────────────────────────────────────────────────────────
-function drawRose(rx, ry, scale = 1) {
+/* =============================================================================
+ *  ROSE
+ * ========================================================================== */
+function drawRose(x,y,ang,scale){
   ctx.save();
-  ctx.translate(rx, ry);
-  ctx.scale(scale, scale);
+  ctx.translate(x,y); ctx.rotate(ang); ctx.scale(scale,scale);
 
-  // Stem
-  ctx.strokeStyle = CLR.roseGreen;
-  ctx.lineWidth = 3;
+  // stem
+  const sg=ctx.createLinearGradient(0,0,0,46);
+  sg.addColorStop(0,C.stemHi); sg.addColorStop(1,C.stem);
+  ctx.strokeStyle=sg; ctx.lineWidth=3.2; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(0,6); ctx.quadraticCurveTo(2,28,0,48); ctx.stroke();
+
+  // leaves
+  ctx.fillStyle=C.stem;
+  [[-1,24,-0.7],[1,34,0.7]].forEach(([sx,sy,r])=>{
+    ctx.save(); ctx.translate(sx*0.5,sy); ctx.rotate(r);
+    ctx.beginPath(); ctx.ellipse(sx*7,0,9,4.2,0,0,7); ctx.fill();
+    ctx.restore();
+  });
+
+  // bloom — layered petals
+  const layer=(rad,col,n,off)=>{
+    ctx.fillStyle=col;
+    for(let i=0;i<n;i++){
+      const a=off+i/n*Math.PI*2;
+      ctx.save(); ctx.rotate(a);
+      ctx.beginPath(); ctx.ellipse(0,-rad*0.55,rad*0.62,rad,0,0,7); ctx.fill();
+      ctx.restore();
+    }
+  };
+  layer(11,C.rose,6,0);
+  layer(8, C.roseHi,5,0.5);
+  ctx.fillStyle=C.roseCore;
+  ctx.beginPath(); ctx.arc(0,-1,4.5,0,7); ctx.fill();
+  // soft glow
+  ctx.save(); ctx.globalCompositeOperation='screen';
+  const rg=ctx.createRadialGradient(0,-2,1,0,-2,16);
+  rg.addColorStop(0,'rgba(255,180,200,0.5)'); rg.addColorStop(1,'rgba(255,180,200,0)');
+  ctx.fillStyle=rg; ctx.beginPath(); ctx.arc(0,-2,16,0,7); ctx.fill();
+  ctx.restore();
+
+  ctx.restore();
+}
+
+/* =============================================================================
+ *  CHARACTER RIG  (build → draw)
+ * ========================================================================== */
+function buildState(t){
+  /* --- horizontal travel + walk cycle ------------------------------------ */
+  const X_START=W*0.96, X_SIT=BX+34;
+  const wp = easeInOutCubic(smooth(0,T.walkEnd,t));
+  const gx = lerp(X_START, X_SIT, wp);
+  const walkAmt = 1 - smooth(T.walkEnd-0.2, T.walkEnd+0.15, t);
+  const phase = Math.min(t,T.walkEnd) * STEP_F;
+  const th = phase*Math.PI*2;
+
+  /* --- sit + pelvis height ------------------------------------------------ */
+  const sit = easeInOutCubic(smooth(T.sitStart,T.sitEnd,t));
+  const bob = -BOB*walkAmt*Math.abs(Math.sin(th));
+  const antic = 5*Math.sin(Math.PI*smooth(T.sitStart-0.28,T.sitStart,t)) * (1-sit); // tiny counter-rise
+  const pelvisY = lerp(STAND_PY+bob-antic, SEAT_PY, sit);
+  const breathe = Math.sin(t*1.8)*1.4*sit;     // gentle seated breathing
+  const pelvis = { x:gx, y:pelvisY+breathe };
+
+  /* --- torso lean --------------------------------------------------------- */
+  const walkLean = 0.05*walkAmt;
+  const sitLean  = 0.20*Math.sin(Math.PI*sit);  // lean forward then settle
+  const reach    = easeInOutCubic(smooth(T.reachA,T.reachB,t));
+  const reachLean= 0.12*Math.sin(Math.PI*reach);
+  const lean = walkLean + sitLean + reachLean;
+
+  /* --- upper body FK (rotate about pelvis by lean) ------------------------ */
+  const rot=(p,a)=>({ x:pelvis.x + p.x*Math.cos(a)-p.y*Math.sin(a),
+                      y:pelvis.y + p.x*Math.sin(a)+p.y*Math.cos(a) });
+  const neck   = rot({x:0,y:-L.torso}, lean);
+  const chest  = rot({x:0,y:-L.torso*0.5}, lean);
+  const shL    = rot({x: L.shHW, y:-L.torso*0.92}, lean);
+  const shR    = rot({x:-L.shHW, y:-L.torso*0.92}, lean);
+  const headC  = rot({x:0,y:-L.torso-L.neckHead}, lean);
+
+  /* --- legs via IK to foot targets --------------------------------------- */
+  function leg(sgn, off){
+    const hip = { x:pelvis.x + sgn*L.hipHW, y:pelvis.y+3 };
+    // walking foot trajectory + IK (knee bends toward forward = -x)
+    const s = Math.sin(th+off);
+    const lift = LIFT*Math.max(0,-Math.cos(th+off));
+    const walkFoot = { x: pelvis.x + sgn*14*S + walkAmt*s*STRIDE*0.5,
+                       y: GROUND - walkAmt*lift };
+    const standFoot= { x: pelvis.x + sgn*14*S, y: GROUND };
+    const wFoot = lerpP(standFoot, walkFoot, walkAmt);
+    const rW = ik(hip, wFoot, L.thigh, L.shin, -1);
+    // seated (back view): shins drop ~straight to the floor, thighs hidden by hem
+    const seatKnee  = { x: pelvis.x + sgn*11*S, y: pelvis.y + 34*S };
+    const seatAnkle = { x: pelvis.x + sgn*12*S, y: GROUND };
+    const knee  = lerpP(rW.joint, seatKnee,  sit);
+    const ankle = lerpP(rW.end,   seatAnkle, sit);
+    return { hip, knee, ankle, foot:ankle, sgn };
+  }
+  const legFar  = leg(+1, Math.PI);   // far leg (our right) drawn first
+  const legNear = leg(-1, 0);
+
+  /* --- arms --------------------------------------------------------------- */
+  // right arm carries / places the rose
+  const carryR = add(shR, {x: 4+6*walkAmt*Math.sin(th+Math.PI), y: (L.uArm+L.fArm)*0.94});
+  const seatRose = { x: BX-58, y: SEAT_Y-3 };
+  const restR  = add(shR, {x: 10, y:(L.uArm+L.fArm)*0.72});  // hand on thigh
+  const retreat= easeInOutCubic(smooth(T.retreatA,T.retreatB,t));
+  let handR = lerpP(carryR, seatRose, reach);
+  handR = lerpP(handR, restR, retreat);
+  const armR = ik(shR, handR, L.uArm, L.fArm, +1);
+
+  // left arm swings while walking, rests on lap when seated
+  const carryL = add(shL, {x:-4+6*walkAmt*Math.sin(th), y:(L.uArm+L.fArm)*0.95});
+  const restL  = add(shL, {x:-8, y:(L.uArm+L.fArm)*0.72});
+  const handL  = lerpP(carryL, restL, sit);
+  const armL   = ik(shL, handL, L.uArm, L.fArm, -1);
+
+  /* --- rose state --------------------------------------------------------- */
+  const placed = reach > 0.985;
+  const rose = placed
+    ? { x: seatRose.x, y: SEAT_Y-1, ang: 1.35, scale: 1 }   // lying on the seat
+    : { x: handR.x, y: handR.y-2, ang: lean*0.3, scale: 1 };
+
+  /* --- hair sway (delayed secondary motion) ------------------------------ */
+  const hairSway = Math.sin(t*2.1-0.6)*0.10*walkAmt + Math.sin(t*1.3)*0.04 + lean*0.5;
+
+  return { pelvis, chest, neck, shL, shR, headC, legFar, legNear,
+           armL, armR, handL, handR, lean, sit, hairSway, rose, walkAmt };
+}
+
+/* tapered limb ribbon through a→b→c with widths wa,wb,wc */
+function limb(a,b,c, wa,wb,wc, fill, withRim=true){
+  const pa=perp(a,b), pc=perp(b,c);
+  const pb=unit(add(pa,pc));
+  const aL=add(a,{x:pa.x*wa,y:pa.y*wa}), aR=sub(a,{x:pa.x*wa,y:pa.y*wa});
+  const bL=add(b,{x:pb.x*wb,y:pb.y*wb}), bR=sub(b,{x:pb.x*wb,y:pb.y*wb});
+  const cL=add(c,{x:pc.x*wc,y:pc.y*wc}), cR=sub(c,{x:pc.x*wc,y:pc.y*wc});
   ctx.beginPath();
-  ctx.moveTo(0, 0);
-  ctx.lineTo(0, 38);
+  ctx.moveTo(aL.x,aL.y);
+  ctx.quadraticCurveTo(bL.x,bL.y, cL.x,cL.y);
+  ctx.lineTo(cR.x,cR.y);
+  ctx.quadraticCurveTo(bR.x,bR.y, aR.x,aR.y);
+  ctx.closePath();
+  ctx.fillStyle=fill; ctx.fill();
+  if(withRim){
+    ctx.save();
+    ctx.strokeStyle=C.rim; ctx.lineWidth=1.6;
+    ctx.shadowColor=C.rimGlow; ctx.shadowBlur=8;
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+function gradFor(p0,p1,hi,lo){
+  const g=ctx.createLinearGradient(p0.x,p0.y,p1.x,p1.y);
+  g.addColorStop(0,hi); g.addColorStop(1,lo); return g;
+}
+
+function drawCharacter(st){
+  const {pelvis,neck,chest,shL,shR,headC,legFar,legNear,armL,armR,lean,hairSway} = st;
+
+  /* far leg (slightly darker for depth) */
+  drawLeg(legFar, '#5c7494','#566f8e');
+  /* far arm (behind torso) */
+  drawArm(armL, shL, st.handL, false);
+
+  /* near leg */
+  drawLeg(legNear, C.jeansHi, C.jeansLo);
+
+  /* torso / hoodie */
+  drawHoodie(st);
+
+  /* hair over the upper back */
+  drawHair(st);
+
+  /* near arm (rose arm, in front) */
+  drawArm(armR, shR, st.handR, true);
+
+  /* rose */
+  drawRose(st.rose.x, st.rose.y, st.rose.ang, st.rose.scale);
+}
+
+function drawLeg(leg, hi, lo){
+  const {hip,knee,ankle,sgn}=leg;
+  // baggy jeans: wider, with a slight flare at the ankle
+  limb(hip,knee,ankle, 15*S,13*S,11*S, gradFor(hip,ankle,hi,lo));
+  // sneaker — drawn flat on the ground, toe pointing forward (-x), mirrored per side
+  ctx.save();
+  ctx.translate(ankle.x, ankle.y+2);
+  ctx.scale(sgn<0?1:-1, 1);          // mirror so both shoes splay outward consistently
+  const g=ctx.createLinearGradient(0,-6,0,8);
+  g.addColorStop(0,C.shoe); g.addColorStop(1,C.shoeLo);
+  ctx.fillStyle=g;
+  ctx.beginPath();
+  ctx.moveTo(7,-6);                   // ankle back
+  ctx.quadraticCurveTo(9,-2, 8,2);
+  ctx.lineTo(-13,5);                  // toe forward
+  ctx.quadraticCurveTo(-18,6, -16,9);
+  ctx.lineTo(6,10);
+  ctx.quadraticCurveTo(9,9, 8,2);
+  ctx.closePath(); ctx.fill();
+  // sole
+  ctx.fillStyle='rgba(255,255,255,0.9)';
+  ctx.beginPath();
+  ctx.moveTo(-16,9); ctx.lineTo(6,10);
+  ctx.quadraticCurveTo(8,13,4,13); ctx.lineTo(-15,12);
+  ctx.quadraticCurveTo(-19,11,-16,9); ctx.closePath(); ctx.fill();
+  // rim
+  ctx.strokeStyle=C.rim; ctx.lineWidth=1.2; ctx.shadowColor=C.rimGlow; ctx.shadowBlur=5;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawArm(arm, sh, hand, front){
+  const hi=front?C.hoodieHi:'#3e3e49', lo=front?C.hoodieLo:'#26262e';
+  limb(sh, arm.joint, hand, 8.5*S,7*S,5.5*S, gradFor(sh,hand,hi,lo));
+  // hand
+  ctx.save();
+  ctx.fillStyle=C.skin;
+  ctx.beginPath(); ctx.arc(hand.x,hand.y,5.4*S,0,7); ctx.fill();
+  ctx.strokeStyle='rgba(255,210,200,0.4)'; ctx.lineWidth=1; ctx.stroke();
+  ctx.restore();
+}
+
+function drawHoodie(st){
+  const {pelvis,chest,neck,shL,shR,lean}=st;
+  const u  = unit(sub(neck,pelvis));           // body up axis
+  const s  = {x:-u.y, y:u.x};                  // left side axis
+  const P=(pt,sx,uy)=>({x:pt.x+s.x*sx+u.x*uy, y:pt.y+s.y*sx+u.y*uy});
+
+  const HHW=L.bodyHipHW, CHW=L.bodyChestHW, OUT=L.shOuter;
+  const hipL=P(pelvis, HHW, 6),  hipR=P(pelvis,-HHW,6);
+  const shLo=P(neck, OUT, 4),    shRo=P(neck,-OUT,4);
+  const hoodL=P(neck, OUT*0.5,-16), hoodR=P(neck,-OUT*0.5,-16);
+
+  ctx.beginPath();
+  ctx.moveTo(hipL.x,hipL.y);
+  ctx.quadraticCurveTo(P(chest,CHW,0).x,P(chest,CHW,0).y, shLo.x,shLo.y);
+  ctx.quadraticCurveTo(hoodL.x,hoodL.y, hoodR.x,hoodR.y);
+  ctx.quadraticCurveTo(P(chest,-CHW,0).x,P(chest,-CHW,0).y, hipR.x,hipR.y);
+  ctx.quadraticCurveTo(P(pelvis,0,12).x,P(pelvis,0,12).y, hipL.x,hipL.y);
+  ctx.closePath();
+  const g=ctx.createLinearGradient(neck.x,neck.y,pelvis.x,pelvis.y);
+  g.addColorStop(0,C.hoodieHi); g.addColorStop(1,C.hoodieLo);
+  ctx.fillStyle=g; ctx.fill();
+
+  // centre seam + hem detail
+  ctx.strokeStyle='rgba(0,0,0,0.18)'; ctx.lineWidth=1.4;
+  ctx.beginPath(); ctx.moveTo(neck.x,neck.y); ctx.lineTo(P(pelvis,0,8).x,P(pelvis,0,8).y); ctx.stroke();
+  // kangaroo pocket
+  const pk=P(pelvis,0,-10);
+  ctx.strokeStyle='rgba(0,0,0,0.16)';
+  ctx.beginPath();
+  ctx.moveTo(P(pk,14,0).x,P(pk,14,0).y);
+  ctx.lineTo(P(pk,10,14).x,P(pk,10,14).y);
+  ctx.lineTo(P(pk,-10,14).x,P(pk,-10,14).y);
+  ctx.lineTo(P(pk,-14,0).x,P(pk,-14,0).y);
   ctx.stroke();
 
-  // Leaf
-  ctx.fillStyle = CLR.roseGreen;
+  // back-light rim along the silhouette
+  ctx.save();
   ctx.beginPath();
-  ctx.ellipse(-6, 20, 8, 4, -0.5, 0, Math.PI * 2);
-  ctx.fill();
+  ctx.moveTo(hipL.x,hipL.y);
+  ctx.quadraticCurveTo(P(chest,CHW,0).x,P(chest,CHW,0).y, shLo.x,shLo.y);
+  ctx.quadraticCurveTo(hoodL.x,hoodL.y, hoodR.x,hoodR.y);
+  ctx.quadraticCurveTo(P(chest,-CHW,0).x,P(chest,-CHW,0).y, hipR.x,hipR.y);
+  ctx.strokeStyle=C.rim; ctx.lineWidth=2; ctx.shadowColor=C.rimGlow; ctx.shadowBlur=10;
+  ctx.stroke();
+  ctx.restore();
 
-  // Petals
-  const petals = [
-    { dx: 0,  dy: 0,  rx: 9,  ry: 7  },
-    { dx: 6,  dy: -3, rx: 8,  ry: 6  },
-    { dx: -6, dy: -3, rx: 8,  ry: 6  },
-    { dx: 0,  dy: -7, rx: 7,  ry: 6  },
-    { dx: 0,  dy: 0,  rx: 6,  ry: 5  },
+  // soft hood collar (subtle, mostly hidden by hair)
+  ctx.fillStyle='rgba(30,20,26,0.35)';
+  ctx.beginPath();
+  ctx.ellipse(neck.x, neck.y+2, OUT*0.36, 6, lean, 0, 7);
+  ctx.fill();
+}
+
+function drawHair(st){
+  const {neck,headC,chest,lean,hairSway}=st;
+  const u  = unit(sub(headC,neck));         // up axis (toward crown)
+  const s  = {x:-u.y, y:u.x};               // left axis
+  const P=(pt,sx,uy)=>({x:pt.x+s.x*sx+u.x*uy, y:pt.y+s.y*sx+u.y*uy});
+  const R=L.headR;
+
+  // neck skin patch (mostly covered by hair)
+  ctx.fillStyle=C.skin;
+  ctx.beginPath(); ctx.ellipse(neck.x,neck.y-2,7*S,9*S,lean,0,7); ctx.fill();
+
+  // hair flows from the crown down onto the upper back (between neck and chest)
+  const flow = lerpP(neck, chest, 0.55);
+  const sway = Math.sin(hairSway)*R*0.5;
+
+  // ── main curly silhouette ──────────────────────────────────────────────
+  const crown = P(headC, 0, R*1.1);
+  const tL = P(headC,  R*1.42, R*0.15),  tR = P(headC, -R*1.42, R*0.15);
+  const mL = P(headC,  R*1.38, -R*0.9),  mR = P(headC, -R*1.38, -R*0.9);
+  const bL = { x:P(flow, R*1.15,0).x+sway,  y:P(flow, R*1.15,0).y };
+  const bR = { x:P(flow,-R*1.15,0).x+sway,  y:P(flow,-R*1.15,0).y };
+  const tip= { x:P(flow, 0,-R*0.5).x+sway*1.4, y:P(flow,0,-R*0.5).y };
+
+  ctx.beginPath();
+  ctx.moveTo(crown.x,crown.y);
+  ctx.quadraticCurveTo(P(headC,R*1.7,R).x,P(headC,R*1.7,R).y, tL.x,tL.y);
+  ctx.quadraticCurveTo(mL.x,mL.y, bL.x,bL.y);
+  ctx.quadraticCurveTo(tip.x,tip.y, bR.x,bR.y);
+  ctx.quadraticCurveTo(mR.x,mR.y, tR.x,tR.y);
+  ctx.quadraticCurveTo(P(headC,-R*1.7,R).x,P(headC,-R*1.7,R).y, crown.x,crown.y);
+  ctx.closePath();
+  const hg=ctx.createLinearGradient(crown.x,crown.y,tip.x,tip.y);
+  hg.addColorStop(0,C.hairHi); hg.addColorStop(0.5,C.hairMid); hg.addColorStop(1,C.hairLo);
+  ctx.fillStyle=hg; ctx.fill();
+
+  // back-light rim around the hair silhouette
+  ctx.save();
+  ctx.strokeStyle='rgba(255,228,170,0.7)'; ctx.lineWidth=2;
+  ctx.shadowColor='rgba(255,225,150,0.8)'; ctx.shadowBlur=12;
+  ctx.stroke();
+  ctx.restore();
+
+  // ── curl texture: scalloped lobes over the whole mass ──────────────────
+  const lobes=[
+    [0,R*1.05,7],[ R*0.7,R*0.8,8],[-R*0.7,R*0.8,8],
+    [ R*1.15,R*0.1,7],[-R*1.15,R*0.1,7],
+    [ R*0.55,-R*0.45,8],[-R*0.55,-R*0.45,8],[0,-R*0.3,8],
   ];
-  petals.forEach((p, i) => {
-    ctx.fillStyle = i === 4 ? '#f090a8' : CLR.rosePink;
-    ctx.beginPath();
-    ctx.ellipse(p.dx, p.dy, p.rx, p.ry, 0, 0, Math.PI * 2);
-    ctx.fill();
+  lobes.forEach(([sx,uy,r],i)=>{
+    const c=P(headC,sx,uy);
+    const grd=ctx.createRadialGradient(c.x-r*0.3,c.y-r*0.3,1,c.x,c.y,r);
+    grd.addColorStop(0,C.hairHi); grd.addColorStop(1,C.hairMid);
+    ctx.fillStyle=grd;
+    ctx.beginPath(); ctx.arc(c.x,c.y,r,0,7); ctx.fill();
   });
+  // curls cascading down the back
+  for(let i=0;i<6;i++){
+    const f=i/5;
+    const cc=lerpP(P(headC,0,-R*0.2), tip, f);
+    cc.x += Math.sin(hairSway+f*2)*sway*0.6 + (i%2?6:-6);
+    const r=(7-f*3)*S;
+    const grd=ctx.createRadialGradient(cc.x-r*0.3,cc.y-r*0.3,1,cc.x,cc.y,r);
+    grd.addColorStop(0,C.hairMid); grd.addColorStop(1,C.hairLo);
+    ctx.fillStyle=grd;
+    ctx.beginPath(); ctx.arc(cc.x,cc.y,r,0,7); ctx.fill();
+  }
 
-  // Centre
-  ctx.fillStyle = '#c03050';
-  ctx.beginPath();
-  ctx.arc(0, -2, 4, 0, Math.PI * 2);
-  ctx.fill();
+  // crown back-light bloom
+  ctx.save(); ctx.globalCompositeOperation='screen';
+  const top=P(headC,0,R*0.9);
+  const g=ctx.createRadialGradient(top.x,top.y,2,top.x,top.y,R*2);
+  g.addColorStop(0,'rgba(255,238,184,0.7)'); g.addColorStop(1,'rgba(255,238,184,0)');
+  ctx.fillStyle=g; ctx.beginPath(); ctx.arc(top.x,top.y,R*2,0,7); ctx.fill();
+  ctx.restore();
 
+  // bright highlight strands catching the back-light
+  ctx.strokeStyle='rgba(255,234,168,0.6)'; ctx.lineWidth=1.4; ctx.lineCap='round';
+  for(let i=-1;i<=1;i++){
+    const a=P(headC,i*9,R*0.5), b={x:tip.x+i*8, y:tip.y-4};
+    ctx.beginPath(); ctx.moveTo(a.x,a.y);
+    ctx.quadraticCurveTo((a.x+b.x)/2+i*5,(a.y+b.y)/2,b.x,b.y); ctx.stroke();
+  }
+}
+
+/* ─── soft contact shadow under the figure ─────────────────────────────── */
+function drawContactShadow(st){
+  const cx = st.pelvis.x;
+  const fy = GROUND+6;
+  ctx.save();
+  ctx.globalCompositeOperation='multiply';
+  const w = lerp(40, 70, st.sit);
+  const g=ctx.createRadialGradient(cx,fy,2,cx,fy,w);
+  g.addColorStop(0,'rgba(60,24,34,0.5)'); g.addColorStop(1,'rgba(60,24,34,0)');
+  ctx.fillStyle=g;
+  ctx.beginPath(); ctx.ellipse(cx,fy,w,12,0,0,7); ctx.fill();
   ctx.restore();
 }
 
-// ─── Girl character ─────────────────────────────────────────────────────────
-/**
- * gx      – character centre x
- * gy      – feet y
- * phase   – 'walk' | 'standbend' | 'sit'
- * walkT   – 0..1 walk cycle progress (for leg swing)
- * sitT    – 0..1 sit-down progress
- * roseT   – 0..1 rose-place progress
- * rosePos – {x,y} current rose position (world coords)
- */
-function drawGirl(gx, gy, phase, walkT, sitT, roseT) {
+/* =============================================================================
+ *  RENDER
+ * ========================================================================== */
+function render(t, now){
+  ctx.clearRect(0,0,W,H);
+
+  // cinematic camera push-in
+  const cam = easeInOutSine(clamp(t/T.end,0,1));
+  const scale = 1 + 0.055*cam;
+  const cx=BX, cy=H*0.58;
   ctx.save();
-  ctx.translate(gx, gy);
+  ctx.translate(cx,cy); ctx.scale(scale,scale); ctx.translate(-cx,-cy + 6*cam);
 
-  const isWalking   = phase === 'walk';
-  const isStandBend = phase === 'standbend';
-  const isSitting   = phase === 'sit';
+  drawSky();
+  drawGodRays(now);
+  drawTrees();
+  drawGround();
 
-  // ── Leg swing angles ──────────────────────────────────────────────────────
-  const legSwing = isWalking ? Math.sin(walkT * Math.PI * 2) * 0.38 : 0;
+  const st = buildState(t);
 
-  // In sit phase legs fold under bench
-  const sitFold = isSitting ? sitT : 0;
-
-  // Body bob (only while walking)
-  const bodyBob = isWalking ? Math.abs(Math.sin(walkT * Math.PI * 2)) * -4 : 0;
-
-  // Lean forward while standing+bending (transitioning to sit)
-  const leanFwd = isStandBend ? sitT * 0.25 : (isSitting ? 0.25 : 0);
-
-  // Vertical offset for sitting (body drops onto bench)
-  const sitDrop = isSitting ? sitT * 52 : (isStandBend ? 0 : 0);
-
-  // Body Y base
-  const baseY = bodyBob - sitDrop;
-
-  // ── Shoe / feet Y relative to body ───────────────────────────────────────
-  const footY = -8;
-
-  // ── Left / right leg ─────────────────────────────────────────────────────
-  function drawLeg(side) {
-    const sign = side === 'L' ? 1 : -1;
-    const sw   = sign * legSwing;
-
-    ctx.save();
-    if (isSitting) {
-      // Sitting: legs hang forward
-      ctx.translate(sign * 14, baseY - 20);
-      ctx.rotate(0.3 * sign + sitFold * 0.9 * sign);
-      // thigh
-      ctx.fillStyle = CLR.jeans;
-      ctx.beginPath();
-      ctx.ellipse(0, 20, 9, 22, 0, 0, Math.PI * 2);
-      ctx.fill();
-      // lower leg
-      ctx.translate(0, 40);
-      ctx.rotate(sitFold * 0.7 * sign);
-      ctx.fillStyle = CLR.jeans;
-      ctx.beginPath();
-      ctx.ellipse(0, 16, 8, 18, 0, 0, Math.PI * 2);
-      ctx.fill();
-      // shoe
-      ctx.fillStyle = CLR.shoe;
-      ctx.beginPath();
-      ctx.ellipse(sign * 3, 34, 10, 6, 0.2 * sign, 0, Math.PI * 2);
-      ctx.fill();
-    } else {
-      ctx.translate(sign * 12, baseY - 10);
-      ctx.rotate(sw);
-      // thigh
-      ctx.fillStyle = CLR.jeans;
-      ctx.beginPath();
-      ctx.ellipse(0, 22, 9, 24, 0, 0, Math.PI * 2);
-      ctx.fill();
-      // knee bend (opposite to swing)
-      ctx.translate(0, 44);
-      ctx.rotate(-sw * 0.5);
-      ctx.fillStyle = CLR.jeans;
-      ctx.beginPath();
-      ctx.ellipse(0, 16, 8, 18, 0, 0, Math.PI * 2);
-      ctx.fill();
-      // shoe
-      ctx.fillStyle = CLR.shoe;
-      ctx.beginPath();
-      ctx.ellipse(sign * 4 + sw * 8, footY + 34, 11, 6, 0.2 * sign, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.restore();
-  }
-
-  drawLeg('R');
-  drawLeg('L');
-
-  // ── Torso ─────────────────────────────────────────────────────────────────
+  // ── wet-ground reflection (character + bench, mirrored & faded) ──
   ctx.save();
-  ctx.translate(0, baseY);
-  ctx.rotate(leanFwd);
-
-  // Hoodie body
-  ctx.fillStyle = CLR.hoodie;
-  ctx.beginPath();
-  ctx.ellipse(0, -68, 22, 38, 0, 0, Math.PI * 2);
-  ctx.fill();
-  // Hoodie lower (wider hips area)
-  ctx.beginPath();
-  ctx.ellipse(0, -42, 24, 18, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  // ── Arms ─────────────────────────────────────────────────────────────────
-  const armSwing = isWalking ? -legSwing * 0.6 : 0;
-
-  // Rose-holding arm (left arm from our view = right arm of the girl facing away)
-  // While sitting, arm lowers to place rose
-  const roseArmAngle = isSitting
-    ? -0.4 + roseT * 0.9    // lowers toward bench
-    : (isStandBend ? -0.3 : armSwing - 0.1);
-
-  // Arms
-  function drawArm(side, angle) {
-    const sign = side === 'L' ? -1 : 1;
-    ctx.save();
-    ctx.translate(sign * 20, -88);
-    ctx.rotate(angle);
-    // upper arm
-    ctx.fillStyle = CLR.hoodie;
-    ctx.beginPath();
-    ctx.ellipse(0, 14, 8, 16, 0, 0, Math.PI * 2);
-    ctx.fill();
-    // forearm
-    ctx.translate(0, 26);
-    ctx.rotate(angle * 0.4);
-    ctx.fillStyle = CLR.hoodie;
-    ctx.beginPath();
-    ctx.ellipse(0, 12, 7, 14, 0, 0, Math.PI * 2);
-    ctx.fill();
-    // hand
-    ctx.fillStyle = CLR.skin;
-    ctx.beginPath();
-    ctx.arc(0, 26, 6, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-  }
-
-  drawArm('R', armSwing + 0.15);   // right arm (our left)
-  drawArm('L', roseArmAngle);      // left arm holds/places rose
-
-  // ── Neck + Head ───────────────────────────────────────────────────────────
-  // Neck
-  ctx.fillStyle = CLR.skin;
-  ctx.beginPath();
-  ctx.ellipse(0, -108, 7, 10, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Head
-  ctx.fillStyle = CLR.skin;
-  ctx.beginPath();
-  ctx.ellipse(0, -130, 19, 22, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  // ── Curly hair ────────────────────────────────────────────────────────────
-  ctx.fillStyle = CLR.hair;
-  // Main hair mass (back)
-  ctx.beginPath();
-  ctx.ellipse(0, -128, 23, 26, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Flowing curls (long hair down the back)
-  const curlOffsets = [
-    { dx: -14, dy: -120, rx: 9,  ry: 30, a: -0.3 },
-    { dx:  0,  dy: -112, rx: 11, ry: 34, a:  0   },
-    { dx:  14, dy: -118, rx: 9,  ry: 28, a:  0.3 },
-    { dx: -8,  dy: -98,  rx: 8,  ry: 22, a: -0.2 },
-    { dx:  8,  dy: -95,  rx: 8,  ry: 22, a:  0.2 },
-  ];
-  curlOffsets.forEach(c => {
-    ctx.save();
-    ctx.translate(c.dx, c.dy);
-    ctx.rotate(c.a);
-    ctx.fillStyle = CLR.hair;
-    ctx.beginPath();
-    ctx.ellipse(0, 0, c.rx, c.ry, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-  });
-
-  // Hair highlight
-  ctx.fillStyle = '#e8c070';
-  ctx.beginPath();
-  ctx.ellipse(-4, -140, 10, 12, -0.3, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.restore(); // torso transform
-  ctx.restore(); // character transform
-}
-
-// ─── Rose world position ─────────────────────────────────────────────────────
-/**
- * Returns the rose {x, y} given the current animation state.
- * While walking, rose is held at the girl's side.
- * While sitting+placing, rose transitions from hand to bench surface.
- */
-function roseWorldPos(gx, gy, phase, walkT, sitT, roseT) {
-  // Hand position approximation (left arm)
-  const baseY  = phase === 'sit' ? -sitT * 52 : 0;
-  const leanFwd = (phase === 'standbend' || phase === 'sit') ? 0.25 : 0;
-
-  // Rough hand x,y in world space while carrying
-  const handX = gx - 28;
-  const handY = gy + baseY - 65;
-
-  if (phase !== 'sit') return { x: handX, y: handY };
-
-  // Bench placement target
-  const benchRoseX = BX - 50;
-  const benchRoseY = BY - 4;
-
-  return {
-    x: handX + (benchRoseX - handX) * roseT,
-    y: handY + (benchRoseY - handY) * roseT,
-  };
-}
-
-// ─── Main render ─────────────────────────────────────────────────────────────
-function render(time) {
-  ctx.clearRect(0, 0, W, H);
-
-  // ── Background layers
-  drawBackground();
-  drawTreeFog();
-  drawPetals();
-
-  // ── Bench (drawn before girl so girl sits "on top")
+  ctx.beginPath(); ctx.rect(0,GROUND,W,H-GROUND); ctx.clip();
+  ctx.translate(0, 2*GROUND); ctx.scale(1,-1);
+  ctx.globalAlpha=0.20; ctx.filter='blur(1.4px)';
   drawBench();
+  drawCharacter(st);
+  ctx.filter='none';
+  ctx.restore();
+  // pink tint over the reflection
+  ctx.save(); ctx.globalCompositeOperation='multiply';
+  const rt=ctx.createLinearGradient(0,GROUND,0,H);
+  rt.addColorStop(0,'rgba(150,60,80,0.1)'); rt.addColorStop(1,'rgba(110,44,60,0.7)');
+  ctx.fillStyle=rt; ctx.fillRect(0,GROUND,W,H-GROUND);
+  ctx.restore();
 
-  // ── Compute girl state from time ─────────────────────────────────────────
-  const GY = H * 0.77;   // feet ground Y
+  drawPetals(now);
+  drawContactShadow(st);
+  drawBench();
+  drawCharacter(st);
 
-  let gx, phase, walkT = 0, sitT = 0, roseT = 0;
+  // foreground haze veil
+  const veil=ctx.createLinearGradient(0,H*0.7,0,H);
+  veil.addColorStop(0,'rgba(190,90,112,0)');
+  veil.addColorStop(1,'rgba(150,60,82,0.45)');
+  ctx.fillStyle=veil; ctx.fillRect(0,H*0.7,W,H*0.3);
 
-  // Walk phase: 0 → 2.5 s
-  // Girl starts at right edge and walks to bench centre
-  if (time <= 2.5) {
-    const p = smoothstep(0, 2.5, time);
-    const startX = W * 0.88;
-    const endX   = BX + 30;   // stops just to the right of the bench
-    gx    = startX + (endX - startX) * p;
-    phase = 'walk';
-    walkT = time * 2.2;        // walk cycle freq
-  }
+  ctx.restore(); // camera
 
-  // Stand-and-bend phase: 2.5 → 4.0 s (transition to sit)
-  else if (time <= 4.0) {
-    gx    = BX + 30;
-    phase = 'standbend';
-    sitT  = smoothstep(2.5, 4.0, time);
-    walkT = 2.5 * 2.2;
-  }
-
-  // Sit + place rose phase: 4.0 → 5.5 s
-  else if (time <= 5.5) {
-    gx    = BX + 10;
-    phase = 'sit';
-    sitT  = 1;
-    roseT = smoothstep(4.0, 5.5, time);
-    walkT = 2.5 * 2.2;
-  }
-
-  // Hold: 5.5 → 6.0 s
-  else {
-    gx    = BX + 10;
-    phase = 'sit';
-    sitT  = 1;
-    roseT = 1;
-    walkT = 2.5 * 2.2;
-  }
-
-  // Rose position
-  const rp = roseWorldPos(gx, GY, phase, walkT, sitT, roseT);
-
-  // Draw rose behind the girl while walking, in front while placing
-  const roseInFront = phase === 'sit' && roseT > 0.5;
-  if (!roseInFront) drawRose(rp.x, rp.y, 1);
-
-  // Draw girl
-  drawGirl(gx, GY, phase, walkT, sitT, roseT);
-
-  if (roseInFront) drawRose(rp.x, rp.y, 1);
-
-  // ── Foreground fog veil
-  const fgFog = ctx.createLinearGradient(0, H * 0.75, 0, H);
-  fgFog.addColorStop(0,   'rgba(180,80,100,0)');
-  fgFog.addColorStop(0.6, 'rgba(160,60,80,0.3)');
-  fgFog.addColorStop(1,   'rgba(140,50,70,0.6)');
-  ctx.fillStyle = fgFog;
-  ctx.fillRect(0, H * 0.75, W, H * 0.25);
-
-  // ── Fade-out overlay at end
-  if (time > 5.5) {
-    const alpha = smoothstep(5.5, 6.0, time);
-    ctx.fillStyle = `rgba(180,80,100,${alpha * 0.7})`;
-    ctx.fillRect(0, 0, W, H);
-  }
+  // vignette
+  const vig=ctx.createRadialGradient(W/2,H*0.5,H*0.4,W/2,H*0.5,H*0.85);
+  vig.addColorStop(0,'rgba(0,0,0,0)'); vig.addColorStop(1,'rgba(40,12,22,0.45)');
+  ctx.fillStyle=vig; ctx.fillRect(0,0,W,H);
 }
 
-// ─── Loop ────────────────────────────────────────────────────────────────────
-function loop(ts) {
-  if (!playing) return;
-  if (lastTS !== null) {
-    const dt = (ts - lastTS) / 1000;
-    t = Math.min(t + dt, DURATION);
-  }
-  lastTS = ts;
-  render(t);
-  if (t < DURATION) {
-    rafId = requestAnimationFrame(loop);
-  } else {
-    playing = false;
-    lastTS  = null;
-  }
+/* =============================================================================
+ *  LOOP + CONTROLS
+ * ========================================================================== */
+let playing=true, startTS=null, pausedAt=0;
+
+function frame(ts){
+  if(startTS===null) startTS=ts;
+  const elapsed=(ts-startTS)/1000 + pausedAt;
+  const t=Math.min(elapsed % CYCLE, T.end);   // freeze during HOLD then loop
+  render(t, ts);
+  if(playing) requestAnimationFrame(frame);
 }
 
-function play() {
-  if (playing) return;
-  if (t >= DURATION) t = 0;
-  playing = true;
-  lastTS  = null;
-  rafId   = requestAnimationFrame(loop);
-}
+const btnPlay=document.getElementById('btnPlay');
+const btnReplay=document.getElementById('btnReplay');
+btnPlay.addEventListener('click',()=>{
+  playing=!playing;
+  if(playing){ startTS=null; requestAnimationFrame(frame); btnPlay.textContent='⏸ Pausa'; }
+  else { btnPlay.textContent='▶ Play'; }
+});
+btnReplay.addEventListener('click',()=>{
+  startTS=null; pausedAt=0;
+  if(!playing){ playing=true; btnPlay.textContent='⏸ Pausa'; requestAnimationFrame(frame); }
+});
 
-function reset() {
-  playing = false;
-  if (rafId) cancelAnimationFrame(rafId);
-  rafId  = null;
-  lastTS = null;
-  t      = 0;
-  render(0);
-}
-
-// ─── Controls ────────────────────────────────────────────────────────────────
-document.getElementById('btnPlay').addEventListener('click', play);
-document.getElementById('btnReset').addEventListener('click', reset);
-
-// Initial frame
-render(0);
+requestAnimationFrame(frame);
