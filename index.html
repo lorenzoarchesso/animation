@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <title>Girl on a Bench – Animation</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #1a0a0e; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; font-family: sans-serif; }
+    canvas { display: block; border-radius: 8px; }
+    .controls { margin-top: 16px; display: flex; gap: 12px; }
+    button {
+      background: #c06080; color: white; border: none; padding: 8px 20px;
+      border-radius: 20px; cursor: pointer; font-size: 14px; transition: background .2s;
+    }
+    button:hover { background: #e07090; }
+  </style>
+</head>
+<body>
+  <canvas id="c" width="1280" height="720"></canvas>
+  <div class="controls">
+    <button id="btnPlay">▶ Play</button>
+    <button id="btnReset">↺ Reset</button>
+  </div>
+  <script src="animation.js"></script>
+</body>
+</html>
